@@ -1,3 +1,4 @@
+// javascript
 const express = require('express');
 const http = require('http');
 const cors = require('cors');
@@ -45,7 +46,6 @@ async function authenticate(req, res, next) {
     }
 }
 
-
 // Timestamp helper
 const nowTs = () => admin.firestore.Timestamp.now();
 
@@ -53,6 +53,14 @@ const nowTs = () => admin.firestore.Timestamp.now();
 const directConversationId = (a, b) => [a, b].sort().join('_');
 
 // --- USER ROUTES ---
+
+// Alias to reduce 404s when clients call /api/me
+app.get('/api/me', authenticate, async (req, res) => {
+    const ref = firestore.collection('users').doc(req.user.uid);
+    const snap = await ref.get();
+    if (!snap.exists) return res.status(404).json({ message: 'User not found' });
+    res.json({ id: snap.id, ...snap.data() });
+});
 
 app.get('/api/users/me', authenticate, async (req, res) => {
     const ref = firestore.collection('users').doc(req.user.uid);
@@ -67,11 +75,44 @@ app.patch('/api/users/me', authenticate, async (req, res) => {
         {
             ...(displayName !== undefined ? { displayName } : {}),
             ...(avatarUrl !== undefined ? { avatarUrl } : {}),
-            updatedAt: nowTs(),
+            updatedAt: nowTs()
         },
         { merge: true }
     );
     res.json({ message: 'Profile updated' });
+});
+
+// Update user preferences/settings (deep merge)
+app.patch('/api/users/settings', authenticate, async (req, res) => {
+    const { preferences = {}, settings = {} } = req.body || {};
+    if (!preferences && !settings) {
+        return res.status(400).json({ message: 'preferences or settings required' });
+    }
+
+    const update = { updatedAt: nowTs() };
+
+    // Preferences
+    if (preferences.language !== undefined) update['preferences.language'] = String(preferences.language);
+    if (preferences.theme !== undefined) update['preferences.theme'] = String(preferences.theme);
+    if (preferences.notifications !== undefined) update['preferences.notifications'] = !!preferences.notifications;
+
+    // Settings
+    if (settings.privacy !== undefined) {
+        const privacy = String(settings.privacy);
+        const allowed = new Set(['public', 'friends', 'private']);
+        if (!allowed.has(privacy)) {
+            return res.status(400).json({ message: 'Invalid settings.privacy. Use public|friends|private' });
+        }
+        update['settings.privacy'] = privacy;
+    }
+    if (settings.dataSharing !== undefined) update['settings.dataSharing'] = !!settings.dataSharing;
+
+    if (Object.keys(update).length === 1) {
+        return res.status(400).json({ message: 'No valid fields to update' });
+    }
+
+    await firestore.collection('users').doc(req.user.uid).set(update, { merge: true });
+    res.json({ message: 'Settings updated' });
 });
 
 app.post('/api/users/sync-profile', authenticate, async (req, res) => {
@@ -83,7 +124,6 @@ app.post('/api/users/sync-profile', authenticate, async (req, res) => {
         res.status(500).json({ message: 'Failed to sync profile', error: err.message });
     }
 });
-
 
 // --- FRIENDS ROUTES ---
 
@@ -100,12 +140,18 @@ app.post('/api/friends/request', authenticate, async (req, res) => {
 
     if (recipientUid === requesterUid) return res.status(400).json({ message: 'Cannot friend yourself' });
 
-    await firestore.collection('users').doc(recipientUid)
-        .collection('friendRequestsIncoming').doc(requesterUid)
+    await firestore
+        .collection('users')
+        .doc(recipientUid)
+        .collection('friendRequestsIncoming')
+        .doc(requesterUid)
         .set({ from: requesterUid, createdAt: nowTs() });
 
-    await firestore.collection('users').doc(requesterUid)
-        .collection('friendRequestsOutgoing').doc(recipientUid)
+    await firestore
+        .collection('users')
+        .doc(requesterUid)
+        .collection('friendRequestsOutgoing')
+        .doc(recipientUid)
         .set({ to: recipientUid, createdAt: nowTs() });
 
     res.json({ message: 'Friend request sent' });
@@ -119,15 +165,19 @@ app.post('/api/friends/accept', authenticate, async (req, res) => {
     const recipientUid = req.user.uid;
     const batch = firestore.batch();
 
-    const incomingRef = firestore.collection('users').doc(recipientUid)
-        .collection('friendRequestsIncoming').doc(requesterUid);
-    const outgoingRef = firestore.collection('users').doc(requesterUid)
-        .collection('friendRequestsOutgoing').doc(recipientUid);
+    const incomingRef = firestore
+        .collection('users')
+        .doc(recipientUid)
+        .collection('friendRequestsIncoming')
+        .doc(requesterUid);
+    const outgoingRef = firestore
+        .collection('users')
+        .doc(requesterUid)
+        .collection('friendRequestsOutgoing')
+        .doc(recipientUid);
 
-    const recipientFriendRef = firestore.collection('users').doc(recipientUid)
-        .collection('friends').doc(requesterUid);
-    const requesterFriendRef = firestore.collection('users').doc(requesterUid)
-        .collection('friends').doc(recipientUid);
+    const recipientFriendRef = firestore.collection('users').doc(recipientUid).collection('friends').doc(requesterUid);
+    const requesterFriendRef = firestore.collection('users').doc(requesterUid).collection('friends').doc(recipientUid);
 
     batch.delete(incomingRef);
     batch.delete(outgoingRef);
@@ -141,15 +191,18 @@ app.post('/api/friends/accept', authenticate, async (req, res) => {
 
 // List friend requests (incoming)
 app.get('/api/friends/requests', authenticate, async (req, res) => {
-    const snaps = await firestore.collection('users').doc(req.user.uid)
-        .collection('friendRequestsIncoming').orderBy('createdAt', 'desc').get();
+    const snaps = await firestore
+        .collection('users')
+        .doc(req.user.uid)
+        .collection('friendRequestsIncoming')
+        .orderBy('createdAt', 'desc')
+        .get();
     res.json(snaps.docs.map(d => ({ id: d.id, ...d.data() })));
 });
 
 // List friends
 app.get('/api/friends', authenticate, async (req, res) => {
-    const snaps = await firestore.collection('users').doc(req.user.uid)
-        .collection('friends').get();
+    const snaps = await firestore.collection('users').doc(req.user.uid).collection('friends').get();
     res.json(snaps.docs.map(d => ({ id: d.id, ...d.data() })));
 });
 
@@ -172,18 +225,22 @@ app.post('/api/messages', authenticate, async (req, res) => {
         content,
         sentAt: nowTs(),
         read: false,
-        attachments: [], // Firebase Storage URLs here
-        type: 'direct',
+        attachments: [],
+        type: 'direct'
     };
 
     const batch = firestore.batch();
 
-    batch.set(convRef, {
-        participants: cidInput ? admin.firestore.FieldValue.arrayUnion(senderUid) : [senderUid, recipientUid],
-        lastMessage: content,
-        updatedAt: nowTs(),
-        type: 'direct',
-    }, { merge: true });
+    batch.set(
+        convRef,
+        {
+            participants: cidInput ? admin.firestore.FieldValue.arrayUnion(senderUid) : [senderUid, recipientUid],
+            lastMessage: content,
+            updatedAt: nowTs(),
+            type: 'direct'
+        },
+        { merge: true }
+    );
 
     batch.set(msgRef, messageData);
 
@@ -200,13 +257,23 @@ app.get('/api/messages/:conversationId', authenticate, async (req, res) => {
     const limit = Math.min(parseInt(req.query.limit || '20', 10), 100);
     const cursorIso = req.query.cursor;
 
-    let q = firestore.collection('conversations').doc(conversationId)
-        .collection('messages').orderBy('sentAt', 'asc').limit(limit);
+    let q = firestore
+        .collection('conversations')
+        .doc(conversationId)
+        .collection('messages')
+        .orderBy('sentAt', 'asc')
+        .limit(limit);
 
     if (cursorIso) {
         const cursorTs = admin.firestore.Timestamp.fromDate(new Date(cursorIso));
-        const cursorSnap = await firestore.collection('conversations').doc(conversationId)
-            .collection('messages').where('sentAt', '>=', cursorTs).orderBy('sentAt', 'asc').limit(1).get();
+        const cursorSnap = await firestore
+            .collection('conversations')
+            .doc(conversationId)
+            .collection('messages')
+            .where('sentAt', '>=', cursorTs)
+            .orderBy('sentAt', 'asc')
+            .limit(1)
+            .get();
         if (!cursorSnap.empty) q = q.startAfter(cursorSnap.docs[0]);
     }
 
@@ -239,11 +306,10 @@ app.post('/api/presence', authenticate, async (req, res) => {
     res.json({ message: 'Presence updated in RTDB' });
 });
 
-
 // --- SOCKET.IO ---
 
 io.on('connection', socket => {
-    socket.on('authenticate', async (token) => {
+    socket.on('authenticate', async token => {
         try {
             const decoded = await admin.auth().verifyIdToken(token);
             const uid = decoded.uid;
@@ -254,7 +320,6 @@ io.on('connection', socket => {
             // Set presence in RTDB with lastActive timestamp and detailed info if available
             const presenceRef = rtdb.ref(`/presence/${uid}`);
 
-            // You can expand here to accept presence details from client or default values
             await presenceRef.set({
                 online: true,
                 lastActive: admin.database.ServerValue.TIMESTAMP,
@@ -276,21 +341,18 @@ io.on('connection', socket => {
                 online: false,
                 lastActive: admin.database.ServerValue.TIMESTAMP
             });
-
         } catch (err) {
             console.log('Socket auth error:', err);
             socket.disconnect(true);
         }
     });
 
-    socket.on('join_conv', (conversationId) => {
+    socket.on('join_conv', conversationId => {
         socket.join(`conv:${conversationId}`);
     });
 
-    socket.on('send_message', async (data) => {
+    socket.on('send_message', async data => {
         // Ideally, clients should call REST API to send message to keep logic central
-        // But you can optionally accept and broadcast here if you want:
-
         io.to(`conv:${data.conversationId}`).emit('receive_message', data);
     });
 
@@ -309,7 +371,7 @@ async function syncUserProfile(uid, email, displayName) {
         await userRef.set({
             email: email || '',
             displayName: displayName || '',
-            username: '', // you can decide how to get or generate username
+            username: '',
             createdAt: now,
             lastLogin: now,
             roles: ['user'],
@@ -336,7 +398,6 @@ async function syncUserProfile(uid, email, displayName) {
     }
 }
 
-
 // --- API DOCS ---
 
 const pkg = require('./package.json');
@@ -347,7 +408,7 @@ const apiDocs = {
     author: 'Veilbound Studios (KamiDanji)',
     auth: {
         scheme: 'Bearer Firebase ID token',
-        header: 'Authorization: Bearer <token>',
+        header: 'Authorization: Bearer <token>'
     },
     dataModels: {
         user: {
@@ -363,15 +424,15 @@ const apiDocs = {
                 preferences: {
                     language: 'string',
                     theme: 'string',
-                    notifications: 'boolean',
+                    notifications: 'boolean'
                 },
                 settings: {
                     privacy: 'string',
-                    dataSharing: 'boolean',
+                    dataSharing: 'boolean'
                 },
                 friends: 'map/object',
-                blockedUsers: 'map/object',
-            },
+                blockedUsers: 'map/object'
+            }
         },
         presence: {
             rtdb: {
@@ -384,62 +445,79 @@ const apiDocs = {
                         gameId: 'string',
                         gameName: 'string',
                         startTime: 'number|null',
-                        state: 'string',
+                        state: 'string'
                     },
                     linkedAccounts: {
                         steam: 'string',
                         xbox: 'string',
-                        psn: 'string',
-                    },
-                },
-            },
-        },
+                        psn: 'string'
+                    }
+                }
+            }
+        }
     },
     endpoints: [
         {
             method: 'GET',
             path: '/api/users/me',
             description: 'Get current user profile.',
-            authRequired: true,
+            authRequired: true
         },
         {
             method: 'PATCH',
             path: '/api/users/me',
             description: 'Update current user profile fields (supports `displayName`, `avatarUrl`).',
             authRequired: true,
-            body: { displayName: 'string?', avatarUrl: 'string?' },
+            body: { displayName: 'string?', avatarUrl: 'string?' }
+        },
+        {
+            method: 'PATCH',
+            path: '/api/users/settings',
+            description: 'Update user preferences and/or settings with a deep merge.',
+            authRequired: true,
+            body: {
+                preferences: {
+                    language: 'string?',
+                    theme: 'string?',
+                    notifications: 'boolean?'
+                },
+                settings: {
+                    privacy: 'string? (public|friends|private)',
+                    dataSharing: 'boolean?'
+                }
+            }
         },
         {
             method: 'POST',
             path: '/api/users/sync-profile',
             description: 'Create or update the current user profile with default values if missing.',
-            authRequired: true,
+            authRequired: true
         },
         {
             method: 'POST',
             path: '/api/friends/request',
             description: 'Send a friend request by username.',
             authRequired: true,
-            body: { username: 'string' },
+            body: { username: 'string' }
         },
         {
             method: 'POST',
             path: '/api/friends/accept',
             description: 'Accept a friend request from another user.',
             authRequired: true,
-            body: { requesterUid: 'string' },
+            body: { requesterUid: 'string' }
         },
         {
             method: 'GET',
             path: '/api/friends/requests',
             description: 'List incoming friend requests.',
-            authRequired: true,
+            authRequired: true
         },
         {
             method: 'GET',
             path: '/api/friends',
             description: 'List current user\'s friends.',
-            authRequired: true,
+            authRequired: true
         },
         {
             method: 'POST',
@@ -449,8 +527,8 @@ const apiDocs = {
             body: {
                 recipientUid: 'string (required if conversationId not provided)',
                 conversationId: 'string (optional)',
-                content: 'string (required)',
-            },
+                content: 'string (required)'
+            }
         },
         {
             method: 'GET',
@@ -458,7 +536,7 @@ const apiDocs = {
             description: 'List messages in a conversation with pagination support.',
             authRequired: true,
             pathParams: { conversationId: 'string' },
-            query: { limit: 'number (default 20, max 100)', cursor: 'ISO string (optional)' },
+            query: { limit: 'number (default 20, max 100)', cursor: 'ISO string (optional)' }
         },
         {
             method: 'POST',
@@ -468,8 +546,8 @@ const apiDocs = {
             body: {
                 statusMessage: 'string (optional)',
                 gameinfo: 'object (optional) - see data model for structure',
-                linkedAccounts: 'object (optional) - e.g. steam, xbox, psn IDs',
-            },
+                linkedAccounts: 'object (optional) - e.g. steam, xbox, psn IDs'
+            }
         }
     ],
     socket: {
@@ -480,34 +558,33 @@ const apiDocs = {
                 name: 'authenticate',
                 direction: 'client->server',
                 payload: '<idToken:string>',
-                description: 'Verifies Firebase token, joins personal room, and sets RTDB presence.',
+                description: 'Verifies Firebase token, joins personal room, and sets RTDB presence.'
             },
             {
                 name: 'join_conv',
                 direction: 'client->server',
                 payload: '{ conversationId:string }',
-                description: 'Joins room `conv:<conversationId>` to receive messages.',
+                description: 'Joins room `conv:<conversationId>` to receive messages.'
             },
             {
                 name: 'send_message',
                 direction: 'client->server',
                 payload: '{ conversationId:string, content:string, ... }',
-                description: 'Optional Socket.IO message send. Server broadcasts `receive_message` event.',
+                description: 'Optional Socket.IO message send. Server broadcasts `receive_message` event.'
             },
             {
                 name: 'receive_message',
                 direction: 'server->client',
                 payload: '{ conversationId:string, id:string, senderUid:string, content:string, sentAt:Timestamp, ... }',
-                description: 'Emitted to room `conv:<conversationId>` when a message is sent.',
+                description: 'Emitted to room `conv:<conversationId>` when a message is sent.'
             }
-        ],
-    },
+        ]
+    }
 };
 
 app.get('/info', (req, res) => {
     res.status(200).json(apiDocs);
 });
-
 
 // Listen on the Cloud Run provided port and all interfaces
 const PORT = process.env.PORT || 8080;
