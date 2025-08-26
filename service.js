@@ -344,6 +344,7 @@ const pkg = require('./package.json');
 const apiDocs = {
     name: 'VMS API',
     version: pkg.version,
+    author: 'Veilbound Studios (KamiDanji)',
     auth: {
         scheme: 'Bearer Firebase ID token',
         header: 'Authorization: Bearer <token>',
