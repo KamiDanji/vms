@@ -1,4 +1,4 @@
-# Veilbound Messaging System (VMS)
+# Veilbound Messaging System (VMS) W.I.P
 
 ![VMS Architecture Overview](https://via.placeholder.com/800x400?text=VMS+Architecture) <!-- Replace with actual image if available -->
 
