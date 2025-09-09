@@ -110,7 +110,7 @@ Key goals:
 - Socket.IO
 
 ## License
-MIT License. See [LICENSE](LICENSE) for details.
+See [LICENSE](LICENSE) for details.
 
 ---
 
