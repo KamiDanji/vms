@@ -13,7 +13,6 @@ module.exports = (io) => {
         // Listen for new messages sent via Socket.IO
         socket.on('send_message', async (data) => {
             // data: { recipientId, content, chatType, senderId }
-            // You may want to save the message to Firestore here as well (better to use API)
             io.to(data.recipientId).emit('receive_message', data);
         });
 
