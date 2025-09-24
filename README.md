@@ -1,7 +1,5 @@
 # Veilbound Messaging System (VMS) W.I.P
 
-![VMS Architecture Overview](https://via.placeholder.com/800x400?text=VMS+Architecture) <!-- Replace with actual image if available -->
-
 ## Introduction
 
 VMS is a backend messaging service designed for the Veilbound ecosystem, integrating seamlessly with websites, game launchers, and games. It provides real-time chat, user management, friend systems, and presence tracking using Firebase's hybrid database approach (Firestore for structured data, Realtime Database for real-time presence) and Socket.IO for live updates.
